@@ -36,6 +36,7 @@ pub struct Options {
     pub xray: bool,
     pub noise: Option<f64>,
     pub saturation: Option<f64>,
+    pub liquid_glass: LiquidGlass,
 }
 
 impl Options {
@@ -44,6 +45,26 @@ impl Options {
             || self.blur
             || self.noise.is_some_and(|x| x > 0.)
             || self.saturation.is_some_and(|x| x != 1.)
+            || self.liquid_glass.is_active()
+    }
+}
+
+/// Liquid glass parameters, all in [0, 1]. Any of them above zero switches the effect to the
+/// liquid glass shader.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct LiquidGlass {
+    pub refraction: f32,
+    pub dispersion: f32,
+    pub specular: f32,
+    /// Width in logical pixels of the refracting band along the edge.
+    pub thickness: f32,
+    /// Edges (left, top, right, bottom) joined to another surface: 1 keeps the lens off them.
+    pub seam: [f32; 4],
+}
+
+impl LiquidGlass {
+    pub fn is_active(&self) -> bool {
+        self.refraction > 0. || self.dispersion > 0. || self.specular > 0.
     }
 }
 
@@ -126,6 +147,19 @@ impl BackgroundEffect {
             xray: effect.xray == Some(true),
             noise: effect.noise,
             saturation: effect.saturation,
+            liquid_glass: LiquidGlass {
+                refraction: effect.refraction.unwrap_or(0.) as f32,
+                dispersion: effect.dispersion.unwrap_or(0.) as f32,
+                specular: effect.specular.unwrap_or(0.) as f32,
+                thickness: effect.thickness.unwrap_or(32.) as f32,
+                seam: [
+                    effect.seam_left,
+                    effect.seam_top,
+                    effect.seam_right,
+                    effect.seam_bottom,
+                ]
+                .map(|x| if x == Some(true) { 1. } else { 0. }),
+            },
         };
 
         // If we have some background effect but xray wasn't explicitly set, default it to true
@@ -193,13 +227,21 @@ impl BackgroundEffect {
                 blur,
                 noise,
                 saturation,
+                self.options.liquid_glass,
                 &mut |elem| push(elem.into()),
             );
         } else {
             // Render non-xray effect.
             let elem = self
                 .nonxray
-                .render(ns, params, blur_options, noise, saturation);
+                .render(
+                    ns,
+                    params,
+                    blur_options,
+                    noise,
+                    saturation,
+                    self.options.liquid_glass,
+                );
             push(elem.into());
         }
     }

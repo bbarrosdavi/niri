@@ -14,7 +14,7 @@ use smithay::utils::user_data::UserDataMap;
 use smithay::utils::{Buffer, Logical, Physical, Rectangle, Scale, Transform};
 
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
-use crate::render_helpers::background_effect::RenderParams;
+use crate::render_helpers::background_effect::{LiquidGlass, RenderParams};
 use crate::render_helpers::blur::{Blur, BlurOptions};
 use crate::render_helpers::renderer::AsGlesFrame as _;
 use crate::render_helpers::shaders::{mat3_uniform, Shaders};
@@ -38,6 +38,7 @@ pub struct FramebufferEffectElement {
     blur_options: Option<BlurOptions>,
     noise: f32,
     saturation: f32,
+    liquid_glass: LiquidGlass,
 }
 
 #[derive(Debug)]
@@ -68,6 +69,7 @@ impl FramebufferEffect {
         blur_options: Option<BlurOptions>,
         noise: f32,
         saturation: f32,
+        liquid_glass: LiquidGlass,
     ) -> FramebufferEffectElement {
         let (clip_geo, corner_radius) = params
             .clip
@@ -89,6 +91,7 @@ impl FramebufferEffect {
             blur_options,
             noise,
             saturation,
+            liquid_glass,
         }
     }
 }
@@ -98,7 +101,7 @@ impl FramebufferEffectElement {
         &self,
         crop: Rectangle<f64, Logical>,
         transform: Transform,
-    ) -> [Uniform<'static>; 7] {
+    ) -> [Uniform<'static>; 12] {
         let offset = crop.loc - (self.clip_geo.loc - self.geometry.loc);
         let offset = Vec2::new(offset.x as f32, offset.y as f32);
         let crop_size = Vec2::new(crop.size.w as f32, crop.size.h as f32);
@@ -124,6 +127,11 @@ impl FramebufferEffectElement {
             Uniform::new("noise", self.noise),
             Uniform::new("saturation", self.saturation),
             Uniform::new("bg_color", [0f32, 0., 0., 0.]),
+            Uniform::new("refraction", self.liquid_glass.refraction),
+            Uniform::new("dispersion", self.liquid_glass.dispersion),
+            Uniform::new("specular", self.liquid_glass.specular),
+            Uniform::new("thickness", self.liquid_glass.thickness),
+            Uniform::new("seam", self.liquid_glass.seam),
         ]
     }
 }
@@ -388,11 +396,18 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
             clamped_dst.size.to_f64().upscale(dst_to_src).to_logical(1.),
         );
 
-        let program = Shaders::get_from_frame(frame).postprocess_and_clip.clone();
+        // The liquid glass program takes five uniforms more than the plain one.
+        let (program, uniform_count) = {
+            let shaders = Shaders::get_from_frame(frame);
+            match &shaders.liquid_glass_and_clip {
+                Some(lg) if self.liquid_glass.is_active() => (Some(lg.clone()), 12),
+                _ => (shaders.postprocess_and_clip.clone(), 7),
+            }
+        };
         let uniforms = program
             .is_some()
             .then(|| self.compute_uniforms(crop, frame.transformation()));
-        let uniforms = uniforms.as_ref().map_or(&[][..], |x| &x[..]);
+        let uniforms = uniforms.as_ref().map_or(&[][..], |x| &x[..uniform_count]);
 
         frame.render_texture_from_to(
             texture,

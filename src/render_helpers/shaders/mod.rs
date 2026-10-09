@@ -15,6 +15,7 @@ pub struct Shaders {
     pub shadow: Option<ShaderProgram>,
     pub clipped_surface: Option<GlesTexProgram>,
     pub postprocess_and_clip: Option<GlesTexProgram>,
+    pub liquid_glass_and_clip: Option<GlesTexProgram>,
     pub resize: Option<ShaderProgram>,
     pub gradient_fade: Option<GlesTexProgram>,
     pub blur: Option<BlurProgram>,
@@ -126,6 +127,33 @@ impl Shaders {
             })
             .ok();
 
+        let liquid_glass_and_clip = renderer
+            .compile_custom_texture_shader(
+                concat!(
+                    include_str!("liquid_glass.frag"),
+                    include_str!("rounding_alpha.frag"),
+                    include_str!("postprocess.frag"),
+                ),
+                &[
+                    UniformName::new("niri_scale", UniformType::_1f),
+                    UniformName::new("geo_size", UniformType::_2f),
+                    UniformName::new("corner_radius", UniformType::_4f),
+                    UniformName::new("input_to_geo", UniformType::Matrix3x3),
+                    UniformName::new("noise", UniformType::_1f),
+                    UniformName::new("saturation", UniformType::_1f),
+                    UniformName::new("bg_color", UniformType::_4f),
+                    UniformName::new("refraction", UniformType::_1f),
+                    UniformName::new("dispersion", UniformType::_1f),
+                    UniformName::new("specular", UniformType::_1f),
+                    UniformName::new("thickness", UniformType::_1f),
+                    UniformName::new("seam", UniformType::_4f),
+                ],
+            )
+            .map_err(|err| {
+                warn!("error compiling liquid_glass_and_clip shader: {err:?}");
+            })
+            .ok();
+
         let resize = compile_resize_program(renderer, include_str!("resize.frag"))
             .map_err(|err| {
                 warn!("error compiling resize shader: {err:?}");
@@ -153,6 +181,7 @@ impl Shaders {
             shadow,
             clipped_surface,
             postprocess_and_clip,
+            liquid_glass_and_clip,
             resize,
             gradient_fade,
             blur,

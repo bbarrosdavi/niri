@@ -1065,6 +1065,22 @@ pub struct BackgroundEffectRule {
     pub noise: Option<FloatOrInt<0, 1000>>,
     #[knuffel(child, unwrap(argument))]
     pub saturation: Option<FloatOrInt<0, 1000>>,
+    #[knuffel(child, unwrap(argument))]
+    pub refraction: Option<FloatOrInt<0, 1>>,
+    #[knuffel(child, unwrap(argument))]
+    pub dispersion: Option<FloatOrInt<0, 1>>,
+    #[knuffel(child, unwrap(argument))]
+    pub specular: Option<FloatOrInt<0, 1>>,
+    #[knuffel(child, unwrap(argument))]
+    pub thickness: Option<FloatOrInt<0, 200>>,
+    #[knuffel(child, unwrap(argument))]
+    pub seam_left: Option<bool>,
+    #[knuffel(child, unwrap(argument))]
+    pub seam_top: Option<bool>,
+    #[knuffel(child, unwrap(argument))]
+    pub seam_right: Option<bool>,
+    #[knuffel(child, unwrap(argument))]
+    pub seam_bottom: Option<bool>,
 }
 
 /// Resolved background effect rule.
@@ -1087,6 +1103,20 @@ pub struct BackgroundEffect {
 
     pub noise: Option<f64>,
     pub saturation: Option<f64>,
+
+    /// Liquid glass: how far the edge bends the background, how much that bend splits the
+    /// colors, and how bright the edge highlight is. All in [0, 1]; unset is off.
+    pub refraction: Option<f64>,
+    pub dispersion: Option<f64>,
+    pub specular: Option<f64>,
+    /// Width in logical pixels of the refracting band along the edge.
+    pub thickness: Option<f64>,
+    /// Edges joined to another surface. The liquid glass lens treats the glass as carrying on
+    /// past them, so it does not bend there and two surfaces placed side by side read as one.
+    pub seam_left: Option<bool>,
+    pub seam_top: Option<bool>,
+    pub seam_right: Option<bool>,
+    pub seam_bottom: Option<bool>,
 }
 
 impl MergeWith<BackgroundEffectRule> for BackgroundEffect {
@@ -1100,6 +1130,24 @@ impl MergeWith<BackgroundEffectRule> for BackgroundEffect {
         if let Some(x) = part.saturation {
             self.saturation = Some(x.0);
         }
+
+        if let Some(x) = part.refraction {
+            self.refraction = Some(x.0);
+        }
+
+        if let Some(x) = part.dispersion {
+            self.dispersion = Some(x.0);
+        }
+
+        if let Some(x) = part.specular {
+            self.specular = Some(x.0);
+        }
+
+        if let Some(x) = part.thickness {
+            self.thickness = Some(x.0);
+        }
+
+        merge_clone_opt!((self, part), seam_left, seam_top, seam_right, seam_bottom);
     }
 }
 

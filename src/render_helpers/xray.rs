@@ -14,7 +14,7 @@ use smithay::utils::user_data::UserDataMap;
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
-use crate::render_helpers::background_effect::RenderParams;
+use crate::render_helpers::background_effect::{LiquidGlass, RenderParams};
 use crate::render_helpers::effect_buffer::EffectBuffer;
 use crate::render_helpers::renderer::AsGlesFrame as _;
 use crate::render_helpers::shaders::{mat3_uniform, Shaders};
@@ -81,6 +81,8 @@ pub struct XrayElement {
     saturation: f32,
     bg_color: Color32F,
     program: Option<GlesTexProgram>,
+    /// Set only when `program` is the liquid glass one.
+    liquid_glass: LiquidGlass,
 }
 
 impl Xray {
@@ -102,9 +104,16 @@ impl Xray {
         blur: bool,
         noise: f32,
         saturation: f32,
+        liquid_glass: LiquidGlass,
         push: &mut dyn FnMut(XrayElement),
     ) {
-        let program = Shaders::get(ctx.renderer).postprocess_and_clip.clone();
+        let (program, liquid_glass) = {
+            let shaders = Shaders::get(ctx.renderer);
+            match &shaders.liquid_glass_and_clip {
+                Some(lg) if liquid_glass.is_active() => (Some(lg.clone()), liquid_glass),
+                _ => (shaders.postprocess_and_clip.clone(), LiquidGlass::default()),
+            }
+        };
 
         let zoom = xray_pos.zoom;
         let pos_in_backdrop = xray_pos.pos_in_backdrop.upscale(zoom);
@@ -202,6 +211,7 @@ impl Xray {
                     saturation,
                     bg_color: *bg_color,
                     program: program.clone(),
+                    liquid_glass,
                 };
                 push(elem);
             }
@@ -252,6 +262,7 @@ impl Xray {
                 saturation,
                 bg_color: self.backdrop_color,
                 program: program.clone(),
+                liquid_glass,
             };
             push(elem);
         }
@@ -259,7 +270,7 @@ impl Xray {
 }
 
 impl XrayElement {
-    fn compute_uniforms(&self) -> [Uniform<'static>; 7] {
+    fn compute_uniforms(&self) -> [Uniform<'static>; 12] {
         [
             Uniform::new("niri_scale", self.scale),
             Uniform::new("geo_size", <[f32; 2]>::from(self.clip_geo_size)),
@@ -268,6 +279,11 @@ impl XrayElement {
             Uniform::new("noise", self.noise),
             Uniform::new("saturation", self.saturation),
             Uniform::new("bg_color", self.bg_color.components()),
+            Uniform::new("refraction", self.liquid_glass.refraction),
+            Uniform::new("dispersion", self.liquid_glass.dispersion),
+            Uniform::new("specular", self.liquid_glass.specular),
+            Uniform::new("thickness", self.liquid_glass.thickness),
+            Uniform::new("seam", self.liquid_glass.seam),
         ]
     }
 }
@@ -339,8 +355,10 @@ impl RenderElement<GlesRenderer> for XrayElement {
             damage
         };
 
+        // The liquid glass program takes five uniforms more than the plain one.
+        let uniform_count = if self.liquid_glass.is_active() { 12 } else { 7 };
         let uniforms = self.program.is_some().then(|| self.compute_uniforms());
-        let uniforms = uniforms.as_ref().map_or(&[][..], |x| &x[..]);
+        let uniforms = uniforms.as_ref().map_or(&[][..], |x| &x[..uniform_count]);
 
         frame.render_texture_from_to(
             &texture,
