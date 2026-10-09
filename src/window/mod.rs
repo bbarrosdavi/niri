@@ -126,6 +126,9 @@ pub struct ResolvedWindowRules {
     /// Override whether to set the Tiled xdg-toplevel state on the window.
     pub tiled_state: Option<bool>,
 
+    /// Whether this window, while floating, follows the active workspace of its monitor.
+    pub sticky: Option<bool>,
+
     /// Background effect configuration.
     pub background_effect: BackgroundEffect,
 
@@ -314,6 +317,9 @@ impl ResolvedWindowRules {
                 }
                 if let Some(x) = rule.tiled_state {
                     resolved.tiled_state = Some(x);
+                }
+                if let Some(x) = rule.sticky {
+                    resolved.sticky = Some(x);
                 }
 
                 resolved

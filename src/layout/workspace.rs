@@ -1676,6 +1676,7 @@ impl<W: LayoutElement> Workspace<W> {
         xray_pos: XrayPos,
         focus_ring: bool,
         layer: RenderLayer,
+        sticky: Option<bool>,
         push: &mut dyn FnMut(WorkspaceRenderElement<R>),
     ) {
         if !self.is_floating_visible() && layer.is_normal() {
@@ -1690,8 +1691,27 @@ impl<W: LayoutElement> Workspace<W> {
             view_rect,
             floating_focus_ring,
             layer,
+            sticky,
             &mut |elem| push(elem.into()),
         );
+    }
+
+    /// Whether the workspace has windows other than sticky floating ones.
+    ///
+    /// Sticky floating windows always live on the active workspace, so they must not make the
+    /// last workspace count as non-empty.
+    pub fn has_windows_besides_sticky(&self) -> bool {
+        self.scrolling.tiles().next().is_some()
+            || self.floating.tiles().any(|tile| !tile.is_sticky())
+    }
+
+    /// Ids of the sticky floating windows on this workspace.
+    pub fn sticky_floating_windows(&self) -> Vec<W::Id> {
+        self.floating
+            .tiles()
+            .filter(|tile| tile.is_sticky())
+            .map(|tile| tile.window().id().clone())
+            .collect()
     }
 
     pub fn render_shadow<R: NiriRenderer>(

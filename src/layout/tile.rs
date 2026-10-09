@@ -706,6 +706,11 @@ impl<W: LayoutElement> Tile<W> {
         &self.window
     }
 
+    /// Whether this tile follows the active workspace while floating.
+    pub fn is_sticky(&self) -> bool {
+        self.window.rules().sticky == Some(true)
+    }
+
     pub fn window_mut(&mut self) -> &mut W {
         &mut self.window
     }

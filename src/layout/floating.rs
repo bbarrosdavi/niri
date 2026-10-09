@@ -1072,6 +1072,8 @@ impl<W: LayoutElement> FloatingSpace<W> {
         view_rect: Rectangle<f64, Logical>,
         focus_ring: bool,
         layer: RenderLayer,
+        // None renders every tile; Some(x) renders only the tiles whose stickiness is x.
+        sticky: Option<bool>,
         push: &mut dyn FnMut(FloatingSpaceRenderElement<R>),
     ) {
         let scale = Scale::from(self.scale);
@@ -1079,7 +1081,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
         // Draw the closing windows on top of the other windows.
         //
         // FIXME: I guess this should rather preserve the stacking order when the window is closed.
-        if layer.is_normal() {
+        if layer.is_normal() && sticky != Some(true) {
             for closing in self.closing_windows.iter().rev() {
                 let elem = closing.render(ctx.as_gles(), view_rect, scale);
                 push(elem.into());
@@ -1090,6 +1092,9 @@ impl<W: LayoutElement> FloatingSpace<W> {
         for (tile, tile_pos) in self.tiles_with_render_positions() {
             // Skip tiles belonging to a different render layer.
             if layer.is_normal() == tile.is_moving_between_workspaces() {
+                continue;
+            }
+            if sticky.is_some_and(|sticky| tile.is_sticky() != sticky) {
                 continue;
             }
 

@@ -1214,14 +1214,8 @@ impl<W: LayoutElement> Layout<W> {
 
                             // Special case handling when empty_workspace_above_first is set and all
                             // workspaces are empty.
-                            if mon.options.layout.empty_workspace_above_first
-                                && mon.workspaces.len() == 2
-                                && mon.workspace_switch.is_none()
-                            {
-                                assert!(!mon.workspaces[0].has_windows_or_name());
-                                assert!(!mon.workspaces[1].has_windows_or_name());
-                                mon.workspaces.remove(1);
-                                mon.active_workspace_idx = 0;
+                            if mon.workspace_switch.is_none() {
+                                mon.collapse_empty_workspace_pair();
                             }
                             return Some(removed);
                         }
@@ -4908,6 +4902,8 @@ impl<W: LayoutElement> Layout<W> {
                 ..
             } => {
                 for (idx, mon) in monitors.iter_mut().enumerate() {
+                    mon.carry_sticky_windows();
+
                     let is_active = self.is_active
                         && idx == *active_monitor_idx
                         && !matches!(self.interactive_move, Some(InteractiveMoveState::Moving(_)));

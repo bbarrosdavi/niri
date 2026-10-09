@@ -670,11 +670,70 @@ impl<W: LayoutElement> Monitor<W> {
 
         // Special case handling when empty_workspace_above_first is set and all workspaces
         // are empty.
-        if self.options.layout.empty_workspace_above_first && self.workspaces.len() == 2 {
-            assert!(!self.workspaces[0].has_windows_or_name());
-            assert!(!self.workspaces[1].has_windows_or_name());
-            self.workspaces.remove(1);
-            self.active_workspace_idx = 0;
+        self.collapse_empty_workspace_pair();
+    }
+
+    /// With empty_workspace_above_first, two workspaces holding nothing but sticky windows
+    /// collapse into one, taking the sticky windows along.
+    pub(super) fn collapse_empty_workspace_pair(&mut self) {
+        if !self.options.layout.empty_workspace_above_first || self.workspaces.len() != 2 {
+            return;
+        }
+
+        let is_empty =
+            |ws: &Workspace<W>| !ws.has_windows_besides_sticky() && ws.name().is_none();
+        if !is_empty(&self.workspaces[0]) || !is_empty(&self.workspaces[1]) {
+            return;
+        }
+
+        for id in self.workspaces[1].sticky_floating_windows() {
+            let removed = self.workspaces[1].remove_tile(&id, Transaction::new());
+            self.workspaces[0].add_tile(
+                removed.tile,
+                WorkspaceAddWindowTarget::Auto,
+                ActivateWindow::No,
+                removed.width,
+                removed.is_full_width,
+                removed.is_floating,
+                None,
+            );
+        }
+
+        self.workspaces.remove(1);
+        self.active_workspace_idx = 0;
+    }
+
+    /// Moves sticky floating windows from the other workspaces onto the active one.
+    ///
+    /// They go in through the workspace directly rather than through [`Self::add_tile`], so a
+    /// sticky window on the last workspace does not spawn a new empty one below it.
+    pub fn carry_sticky_windows(&mut self) {
+        let active_idx = self.active_workspace_idx;
+        let mut moved = false;
+
+        for idx in 0..self.workspaces.len() {
+            if idx == active_idx {
+                continue;
+            }
+
+            for id in self.workspaces[idx].sticky_floating_windows() {
+                let removed = self.workspaces[idx].remove_tile(&id, Transaction::new());
+                self.workspaces[active_idx].add_tile(
+                    removed.tile,
+                    WorkspaceAddWindowTarget::Auto,
+                    ActivateWindow::No,
+                    removed.width,
+                    removed.is_full_width,
+                    removed.is_floating,
+                    // No move animation: the window stays put on screen.
+                    None,
+                );
+                moved = true;
+            }
+        }
+
+        if moved && self.workspace_switch.is_none() {
+            self.clean_up_workspaces();
         }
     }
 
@@ -1706,6 +1765,33 @@ impl<W: LayoutElement> Monitor<W> {
             )
         };
 
+        // Outside the overview, sticky floating windows stay put on screen during workspace
+        // switches: draw them at the resting position of the active workspace, above everything.
+        let pin_sticky = self.overview_progress.is_none();
+        let active_ws_id = self.workspaces[self.active_workspace_idx].id();
+        if pin_sticky {
+            let geo = Rectangle::from_size(self.workspace_size(zoom));
+            let xray_pos = XrayPos::new(geo.loc, zoom);
+            let crop_bounds = Rectangle::new(
+                Point::from((-i32::MAX / 2, -i32::MAX / 2)),
+                Size::from((i32::MAX, i32::MAX)),
+            );
+            self.workspaces[self.active_workspace_idx].render_floating(
+                ctx.r(),
+                xray_pos,
+                focus_ring,
+                RenderLayer::Normal,
+                Some(true),
+                &mut |elem| {
+                    let elem = CropRenderElement::from_element(elem, scale, crop_bounds);
+                    if let Some(elem) = elem {
+                        let elem = MonitorInnerRenderElement::from(elem);
+                        push(scale_relocate(geo, elem));
+                    }
+                },
+            );
+        }
+
         // Draw in passes for correct Z ordering during window movement between workspaces:
         // - floating windows moving between workspaces
         // - normal floating windows
@@ -1760,6 +1846,7 @@ impl<W: LayoutElement> Monitor<W> {
                 }
 
                 let xray_pos = XrayPos::new(geo.loc, zoom);
+                let sticky = (pin_sticky && ws.id() == active_ws_id).then_some(false);
 
                 match pass {
                     0 => {
@@ -1768,6 +1855,7 @@ impl<W: LayoutElement> Monitor<W> {
                             xray_pos,
                             focus_ring,
                             RenderLayer::MovingBetweenWorkspaces,
+                            sticky,
                             push!(),
                         );
                     }
@@ -1777,6 +1865,7 @@ impl<W: LayoutElement> Monitor<W> {
                             xray_pos,
                             focus_ring,
                             RenderLayer::Normal,
+                            sticky,
                             push!(),
                         );
 
@@ -2141,12 +2230,12 @@ impl<W: LayoutElement> Monitor<W> {
         }
 
         assert!(
-            !self.workspaces.last().unwrap().has_windows(),
+            !self.workspaces.last().unwrap().has_windows_besides_sticky(),
             "monitor must have an empty workspace in the end"
         );
         if self.options.layout.empty_workspace_above_first {
             assert!(
-                !self.workspaces.first().unwrap().has_windows(),
+                !self.workspaces.first().unwrap().has_windows_besides_sticky(),
                 "first workspace must be empty when empty_workspace_above_first is set"
             )
         }

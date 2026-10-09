@@ -348,10 +348,12 @@ prop_compose! {
     fn arbitrary_rules()(
         focus_ring in arbitrary_focus_ring(),
         border in arbitrary_border(),
+        sticky in prop::option::of(any::<bool>()),
     ) -> ResolvedWindowRules {
         ResolvedWindowRules {
             focus_ring,
             border,
+            sticky,
             ..ResolvedWindowRules::default()
         }
     }
@@ -3592,6 +3594,113 @@ fn move_column_to_workspace_unfocused_with_multiple_monitors() {
             }
         );
     }
+}
+
+fn sticky_window_params(id: usize) -> TestWindowParams {
+    TestWindowParams {
+        is_floating: true,
+        rules: Some(ResolvedWindowRules {
+            sticky: Some(true),
+            ..ResolvedWindowRules::default()
+        }),
+        ..TestWindowParams::new(id)
+    }
+}
+
+#[test]
+fn sticky_floating_window_follows_active_workspace() {
+    let ops = [
+        Op::AddOutput(1),
+        Op::AddWindow {
+            params: TestWindowParams::new(1),
+        },
+        Op::FocusWorkspaceDown,
+        Op::AddWindow {
+            params: TestWindowParams::new(2),
+        },
+        Op::FocusWorkspaceUp,
+        Op::AddWindow {
+            params: sticky_window_params(3),
+        },
+        Op::FocusWorkspaceDown,
+        Op::Refresh { is_active: true },
+    ];
+    let mut layout = check_ops(ops);
+
+    {
+        let MonitorSet::Normal { monitors, .. } = &layout.monitor_set else {
+            unreachable!()
+        };
+        let mon = &monitors[0];
+        assert_eq!(mon.active_workspace_idx, 1);
+        assert!(mon.workspaces[1].has_window(&3));
+        assert!(mon.workspaces[1].is_floating(&3));
+        assert!(!mon.workspaces[0].has_window(&3));
+    }
+
+    // Onto the empty last workspace: the sticky window must not create another one below.
+    check_ops_on_layout(
+        &mut layout,
+        [
+            Op::FocusWorkspaceDown,
+            Op::Refresh { is_active: true },
+            Op::FocusWorkspaceDown,
+            Op::Refresh { is_active: true },
+        ],
+    );
+
+    {
+        let MonitorSet::Normal { monitors, .. } = &layout.monitor_set else {
+            unreachable!()
+        };
+        let mon = &monitors[0];
+        assert_eq!(mon.workspaces.len(), 3);
+        assert_eq!(mon.active_workspace_idx, 2);
+        assert!(mon.workspaces[2].has_window(&3));
+    }
+
+    // Back up: the last workspace is empty again and nothing was lost.
+    check_ops_on_layout(
+        &mut layout,
+        [
+            Op::FocusWorkspaceUp,
+            Op::Refresh { is_active: true },
+            Op::FocusWorkspaceUp,
+            Op::Refresh { is_active: true },
+        ],
+    );
+
+    let MonitorSet::Normal { monitors, .. } = &layout.monitor_set else {
+        unreachable!()
+    };
+    let mon = &monitors[0];
+    assert_eq!(mon.workspaces.len(), 3);
+    assert_eq!(mon.active_workspace_idx, 0);
+    assert!(mon.workspaces[0].has_window(&3));
+    assert!(mon.workspaces[0].has_window(&1));
+    assert!(mon.workspaces[1].has_window(&2));
+    assert!(!mon.workspaces[2].has_windows());
+}
+
+#[test]
+fn tiled_window_with_sticky_rule_stays_put() {
+    let ops = [
+        Op::AddOutput(1),
+        Op::AddWindow {
+            params: TestWindowParams {
+                is_floating: false,
+                ..sticky_window_params(1)
+            },
+        },
+        Op::FocusWorkspaceDown,
+        Op::Refresh { is_active: true },
+    ];
+    let layout = check_ops(ops);
+
+    let MonitorSet::Normal { monitors, .. } = &layout.monitor_set else {
+        unreachable!()
+    };
+    assert!(monitors[0].workspaces[0].has_window(&1));
 }
 
 #[test]
