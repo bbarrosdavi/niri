@@ -644,12 +644,46 @@ impl<W: LayoutElement> Monitor<W> {
         }
 
         // Special case handling when empty_workspace_above_first is set and all workspaces
-        // are empty.
-        if self.options.layout.empty_workspace_above_first && self.workspaces.len() == 2 {
-            assert!(!self.workspaces[0].has_windows_or_name());
-            assert!(!self.workspaces[1].has_windows_or_name());
+        // are empty. A sticky window can keep one of the two alive.
+        if self.options.layout.empty_workspace_above_first
+            && self.workspaces.len() == 2
+            && !self.workspaces[0].has_windows_or_name()
+            && !self.workspaces[1].has_windows_or_name()
+        {
             self.workspaces.remove(1);
             self.active_workspace_idx = 0;
+        }
+    }
+
+    /// Moves sticky floating windows from the other workspaces onto the active one.
+    ///
+    /// They go in through the workspace directly rather than through [`Self::add_tile`], so a
+    /// sticky window on the last workspace does not spawn a new empty one below it.
+    pub fn carry_sticky_windows(&mut self) {
+        let active_idx = self.active_workspace_idx;
+        let mut moved = false;
+
+        for idx in 0..self.workspaces.len() {
+            if idx == active_idx {
+                continue;
+            }
+
+            for id in self.workspaces[idx].sticky_floating_windows() {
+                let removed = self.workspaces[idx].remove_tile(&id, Transaction::new());
+                self.workspaces[active_idx].add_tile(
+                    removed.tile,
+                    WorkspaceAddWindowTarget::Auto,
+                    ActivateWindow::No,
+                    removed.width,
+                    removed.is_full_width,
+                    removed.is_floating,
+                );
+                moved = true;
+            }
+        }
+
+        if moved && self.workspace_switch.is_none() {
+            self.clean_up_workspaces();
         }
     }
 
@@ -1720,7 +1754,28 @@ impl<W: LayoutElement> Monitor<W> {
             )
         };
 
-        for (ws, geo) in self.workspaces_with_render_geo() {
+        // Outside the overview, sticky floating windows stay put on screen during workspace
+        // switches: draw them at the resting position of the active workspace, above everything.
+        let pin_sticky = self.overview_progress.is_none();
+        if pin_sticky {
+            let geo = Rectangle::from_size(self.workspace_size(zoom));
+            let xray_pos = XrayPos::new(geo.loc, zoom);
+            self.workspaces[self.active_workspace_idx].render_floating(
+                ctx.r(),
+                xray_pos,
+                focus_ring,
+                Some(true),
+                &mut |elem| {
+                    let elem = CropRenderElement::from_element(elem, scale, crop_bounds);
+                    if let Some(elem) = elem {
+                        let elem = MonitorInnerRenderElement::from(elem);
+                        push(scale_relocate(geo, elem));
+                    }
+                },
+            );
+        }
+
+        for ((idx, ws), geo) in self.workspaces_with_render_geo_idx() {
             // Macro instead of closure because ws and insert hint have different elem types.
             macro_rules! push {
                 () => {{
@@ -1736,7 +1791,8 @@ impl<W: LayoutElement> Monitor<W> {
 
             let xray_pos = XrayPos::new(geo.loc, zoom);
 
-            ws.render_floating(ctx.r(), xray_pos, focus_ring, push!());
+            let sticky = (pin_sticky && idx == self.active_workspace_idx).then_some(false);
+            ws.render_floating(ctx.r(), xray_pos, focus_ring, sticky, push!());
 
             if let Some(loc) = insert_hint_render_loc {
                 if loc.workspace == InsertWorkspace::Existing(ws.id()) {
@@ -2077,12 +2133,12 @@ impl<W: LayoutElement> Monitor<W> {
         }
 
         assert!(
-            !self.workspaces.last().unwrap().has_windows(),
+            !self.workspaces.last().unwrap().has_windows_besides_sticky(),
             "monitor must have an empty workspace in the end"
         );
         if self.options.layout.empty_workspace_above_first {
             assert!(
-                !self.workspaces.first().unwrap().has_windows(),
+                !self.workspaces.first().unwrap().has_windows_besides_sticky(),
                 "first workspace must be empty when empty_workspace_above_first is set"
             )
         }
